@@ -1,10 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-Main module for python-amazon-mws package.
-"""
-# TODO: Add Subscriptions class
-# TODO: Add Merchant Fulfillment class
-
 from __future__ import absolute_import
 
 from time import gmtime, strftime
@@ -24,10 +18,11 @@ try:
     from urllib.parse import quote
 except ImportError:
     from urllib import quote
-from xml.etree.ElementTree import ParseError as XMLError
+try:
+    from xml.etree.ElementTree import ParseError as XMLError
+except ImportError:
+    from xml.parsers.expat import ExpatError as XMLError
 
-
-__version__ = '1.0.0dev0'
 
 __all__ = [
     'Feeds',
@@ -58,9 +53,9 @@ MARKETPLACES = {
     "JP": "https://mws.amazonservices.jp",  # A1VC38T7YXB528
     "CN": "https://mws.amazonservices.com.cn",  # AAHKV2X7AFYLW
     "MX": "https://mws.amazonservices.com.mx",  # A1AM78C64UM0Y8
-    "NL": "https://mws-eu.amazonservices.com",  # A1805IZSGTT6HS
     "AU": "https://mws.amazonservices.com.au",  # A39IBJ37TRP1C6
     "BR": "https://mws.amazonservices.com",  # A2Q3Y263D00KWC
+    "NL": "https://mws-eu.amazonservices.com",  # A1805IZSGTT6HS
 }
 
 
@@ -81,9 +76,6 @@ def calc_md5(string):
     md5_hash.update(string)
     return base64.b64encode(md5_hash.digest()).strip(b'\n')
 
-    Each key-value pair takes the form "key=value"
-    Sets of "key=value" pairs are joined by "&".
-    Keys should appear in alphabetical order in the result string.
 
 def calc_request_description(params):
     request_description = ''
@@ -109,30 +101,7 @@ def remove_namespace(xml):
     return regex.sub('', xml)
 
 
-def assert_no_token(token):
-    """
-    We allow passing a next_token as an argument to request methods that have an associated
-    "...ByNextToken" operation. This token should be captured by `utils.next_token_action` and handled
-    accordingly, bypassing the original request method.
-
-    If a non-None token propagates to the original method, then something has gone awry.
-    This ensures we get notified when/if that happens (which it shouldn't).
-    """
-    # TODO Check if still needed, propagate to all methods or to none.
-    assert token is None, (
-        "`next_token` passed to request method. "
-        "Should have been parsed by `next_token_action` decorator."
-    )
-
-
 class DictWrapper(object):
-    """
-    Main class that converts XML data to a parsed response object as a tree of ObjectDicts,
-    stored in the .parsed property.
-    """
-    # TODO create a base class for DictWrapper and DataWrapper with all the keys we expect in responses.
-    # This will make it easier to use either class in place of each other.
-    # Either this, or pile everything into DataWrapper and make it able to handle all cases.
     def __init__(self, xml, rootkey=None):
         self.original = xml
         self.response = None
@@ -142,9 +111,6 @@ class DictWrapper(object):
 
     @property
     def parsed(self):
-        """
-        Provides access to the parsed contents of an XML response as a tree of ObjectDicts.
-        """
         if self._rootkey:
             return self._response_dict.get(self._rootkey)
         return self._response_dict
@@ -158,16 +124,12 @@ class DataWrapper(object):
         self.original = data
         self.response = None
         if 'content-md5' in header:
-            hash_ = utils.calc_md5(self.original)
+            hash_ = calc_md5(self.original)
             if header['content-md5'].encode() != hash_:
                 raise MWSError("Wrong Contentlength, maybe amazon error...")
 
     @property
     def parsed(self):
-        """
-        Similar to the `parsed` property of DictWrapper, this provides a similar interface for a data response
-        that could not be parsed as XML.
-        """
         return self.original
 
 
@@ -203,10 +165,6 @@ class MWS(object):
     # like "Merchant" in which case you define it like so.
     # ACCOUNT_TYPE = "Merchant"
     # Which is the name of the parameter for that specific account type.
-
-    # For using proxy you need to init this class with one more parameter proxies. It must look like 'ip_address:port'
-    # if proxy without auth and 'login:password@ip_address:port' if proxy with auth
-
     ACCOUNT_TYPE = "SellerId"
 
     def __init__(self, access_key, secret_key, account_id,
@@ -218,22 +176,16 @@ class MWS(object):
         self.auth_token = auth_token
         self.version = version or self.VERSION
         self.uri = uri or self.URI
-        self.proxy = proxy
-
-        # * TESTING FLAGS * #
-        self._test_request_params = False
 
         if domain:
-            # TODO test needed to enter here.
             self.domain = domain
         elif region in MARKETPLACES:
             self.domain = MARKETPLACES[region]
         else:
-            # TODO test needed to enter here.
-            error_msg = "Incorrect region supplied ('{region}'). Must be one of the following: {marketplaces}".format(
-                marketplaces=', '.join(MARKETPLACES.keys()),
-                region=region,
-            )
+            error_msg = "Incorrect region supplied ('%(region)s'). Must be one of the following: %(marketplaces)s" % {
+                "marketplaces": ', '.join(MARKETPLACES.keys()),
+                "region": region,
+            }
             raise MWSError(error_msg)
 
     def get_params(self):
@@ -256,24 +208,7 @@ class MWS(object):
         """
         Make request to Amazon MWS API with these parameters
         """
-        params = {
-            'AWSAccessKeyId': self.access_key,
-            self.ACCOUNT_TYPE: self.account_id,
-            'SignatureVersion': '2',
-            'Timestamp': utils.get_utc_timestamp(),
-            'Version': self.version,
-            'SignatureMethod': 'HmacSHA256',
-        }
-        if self.auth_token:
-            params['MWSAuthToken'] = self.auth_token
-        # TODO current tests only check for auth_token being set.
-        # need a branch test to check for auth_token being skipped (no key present)
-        return params
 
-    def make_request(self, extra_data, method="GET", **kwargs):
-        """
-        Make request to Amazon MWS API with these parameters
-        """
         # Remove all keys with an empty value because
         # Amazon's MWS does not allow such a thing.
         extra_data = remove_empty(extra_data)
@@ -301,7 +236,7 @@ class MWS(object):
             # My answer is, here i have to get the url parsed string of params in order to sign it, so
             # if i pass the params dict as params to request, request will repeat that step because it will need
             # to convert the dict to a url parsed string, so why do it twice if i can just pass the full url :).
-            response = request(method, url, data=kwargs.get('body', ''), headers=headers, proxies=proxies)
+            response = request(method, url, data=kwargs.get('body', ''), headers=headers)
             response.raise_for_status()
             # When retrieving data from the response object,
             # be aware that response.content returns the content in bytes while response.text calls
@@ -321,30 +256,21 @@ class MWS(object):
             except XMLError:
                 parsed_response = DataWrapper(data, response.headers)
 
-        except HTTPError as exc:
-            error = MWSError(str(exc.response.text))
-            error.response = exc.response
+        except HTTPError as e:
+            error = MWSError(str(e.response.text))
+            error.response = e.response
             raise error
 
         # Store the response object in the parsed_response for quick access
         parsed_response.response = response
         return parsed_response
 
-    def get_proxies(self):
-        proxies = {"http": None, "https": None}
-        if self.proxy:
-            # TODO need test to enter here
-            proxies = {
-                "http": "http://{}".format(self.proxy),
-                "https": "https://{}".format(self.proxy),
-            }
-        return proxies
-
     def get_service_status(self):
         """
         Returns a GREEN, GREEN_I, YELLOW or RED status.
         Depending on the status/availability of the API its being called from.
         """
+
         return self.make_request(extra_data=dict(Action='GetServiceStatus'))
 
     def action_by_next_token(self, action, next_token):
