@@ -1353,4 +1353,5 @@ class Recommendations(MWS):
             "Use `list_recommendations(next_token=token)` instead.",
             DeprecationWarning,
         )
-        return self.list_recommendations(next_token=token)
+        return self.list_recommendations(next_token=token
+)
