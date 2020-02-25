@@ -1,5 +1,4 @@
-from mws.mws import calc_request_description
-from mws.utils import calc_md5
+from mws.mws import calc_md5, calc_request_description
 
 
 def test_calc_md5():

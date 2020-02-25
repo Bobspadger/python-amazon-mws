@@ -7,10 +7,9 @@ Borrowed from https://github.com/timotheus/ebaysdk-python
 @author: pierre
 """
 from __future__ import absolute_import
+from functools import wraps
 import re
-import base64
 import datetime
-import hashlib
 import xml.etree.ElementTree as ET
 
 
@@ -119,20 +118,11 @@ class XML2Dict(object):
 
     def fromstring(self, str_):
         """
-        Convert XML-formatted string to an ObjectDict.
+        Parse a string
         """
         text = ET.fromstring(str_)
         root_tag, root_tree = self._namespace_split(text.tag, self._parse_node(text))
         return ObjectDict({root_tag: root_tree})
-
-
-def calc_md5(string):
-    """
-    Calculates the MD5 encryption for the given string
-    """
-    md5_hash = hashlib.md5()
-    md5_hash.update(string)
-    return base64.b64encode(md5_hash.digest()).strip(b'\n')
 
 
 def enumerate_param(param, values):
@@ -230,35 +220,6 @@ def enumerate_keyed_param(param, values):
     return params
 
 
-def dict_keyed_param(param, dict_from):
-    """
-    Given a param string and a dict, returns a flat dict of keyed params without enumerate.
-
-    Example:
-        param = "ShipmentRequestDetails.PackageDimensions"
-        dict_from = {'Length': 5, 'Width': 5, 'Height': 5, 'Unit': 'inches'}
-
-    Returns:
-        {
-            'ShipmentRequestDetails.PackageDimensions.Length': 5,
-            'ShipmentRequestDetails.PackageDimensions.Width': 5,
-            'ShipmentRequestDetails.PackageDimensions.Height': 5,
-            'ShipmentRequestDetails.PackageDimensions.Unit': 'inches',
-            ...
-        }
-    """
-    params = {}
-
-    if not param.endswith('.'):
-        # Ensure the enumerated param ends in '.'
-        param += '.'
-    for k, v in dict_from.items():
-        params.update({
-            "{param}{key}".format(param=param, key=k): v
-        })
-    return params
-
-
 def unique_list_order_preserved(seq):
     """
     Returns a unique list of items from the sequence
@@ -287,11 +248,25 @@ def dt_iso_or_none(dt_obj):
     return None
 
 
-def get_utc_timestamp():
+def next_token_action(action_name):
     """
-    Returns the current UTC timestamp in ISO-8601 format.
+    Decorator that designates an action as having a "...ByNextToken" associated request.
+    Checks for a `next_token` kwargs in the request and, if present, redirects the call
+    to `action_by_next_token` using the given `action_name`.
+
+    Only the `next_token` kwarg is consumed by the "next" call:
+    all other args and kwargs are ignored and not required.
     """
-    return datetime.datetime.utcnow().replace(microsecond=0).isoformat()
+    def _decorator(request_func):
+        @wraps(request_func)
+        def _wrapped_func(self, *args, **kwargs):
+            next_token = kwargs.pop('next_token', None)
+            if next_token is not None:
+                # Token captured: run the "next" action.
+                return self.action_by_next_token(action_name, next_token)
+            return request_func(self, *args, **kwargs)
+        return _wrapped_func
+    return _decorator
 
 
 # DEPRECATION: these are old names for these objects, which have been updated
